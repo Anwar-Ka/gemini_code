@@ -2,10 +2,10 @@ import os, sys
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-from functions.get_files_info import schema_get_files_info
-from functions.get_file_content import schema_get_file_content
-from functions.write_file import schema_write_file
-from functions.run_python import schema_run_python_file
+from functions.get_files_info import schema_get_files_info, get_files_info
+from functions.get_file_content import schema_get_file_content, get_file_content
+from functions.write_file import schema_write_file, write_file
+from functions.run_python import schema_run_python_file, run_python_file
 
 load_dotenv()
 api_key = os.environ.get("GEMINI_API_KEY")
@@ -37,25 +37,49 @@ def llm_call():
         tools=[available_functions],))
         messages.append(types.Content(role="model", parts=[types.Part(text=response.text)]))
 
-        if verbose:
-            print(f"User prompt: {user_prompt}")
-            if response.function_calls:
-                for function_call in response.function_calls:
-                    print(f'Calling function: {function_call.name} ({function_call.args})')
-            else:
-                print(response.text)
-            print("Prompt tokens:", response.usage_metadata.prompt_token_count)
-            print("Response tokens:", response.usage_metadata.candidates_token_count)
-        else:
-            if response.function_calls:
-                for function_call in response.function_calls:
-                    print(f'Calling function: {function_call.name} ({function_call.args})')
-            else:
-                print(response.text)
-
-        return response.text
+        return response.text, response.function_calls
 
     return prompt_runner
+
+def call_function(function_call_part, verbose=False):
+    function_name = function_call_part.name
+    args = function_call_part.args
+
+    if verbose:
+        print(f'Calling function: {function_name} ({args})')
+    else:
+        print(f' - Calling function: {function_name}')
+
+    agent_functions = {
+    "get_files_info": get_files_info,
+    "get_file_content": get_file_content,
+    "write_file": write_file,
+    "run_python_file": run_python_file
+}
+
+    if function_name not in agent_functions:
+        return types.Content(
+            role="tool",
+            parts=[types.Part.from_function_response(
+                name=function_name,
+                response={"error": f"Unknown function: {function_name}"}
+            )]
+        )
+
+    args["working_directory"] = "./calculator"
+
+    try:
+        function_result = agent_functions[function_name](**args)
+    except Exception as e:
+        function_result = f"Error while calling function: {str(e)}"
+
+    return types.Content(
+        role="tool",
+        parts=[types.Part.from_function_response(
+            name=function_name,
+            response={"result": function_result}
+        )]
+    )
 
 def main():
     if len(sys.argv) < 2:
@@ -63,7 +87,20 @@ def main():
         sys.exit(1)
 
     conversation = llm_call()
-    conversation()
+    llm_response, functions_called = conversation()
+
+    if functions_called:
+        for function_call in functions_called:
+            function_result = call_function(function_call, verbose=(sys.argv[-1] == "--verbose"))
+            try:
+                result_payload = function_result.parts[0].function_response.response
+                if sys.argv[-1] == "--verbose":
+                    print(f"-> {result_payload}")
+            except Exception:
+                print("Fatal: Function call did not produce a valid response.")
+                sys.exit(1)
+    else:
+        print(llm_response)
 
 if __name__ == "__main__":
     main()
