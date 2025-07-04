@@ -7,9 +7,11 @@ load_dotenv()
 api_key = os.environ.get("GEMINI_API_KEY")
 client = genai.Client(api_key=api_key)
 
-def llm_call(verbose=False):
+def llm_call():
     messages = []
-    def prompt_runner(user_prompt):
+    def prompt_runner():
+        verbose = sys.argv[-1] == "--verbose"
+        user_prompt = " ".join(sys.argv[1:-1]) if verbose else " ".join(sys.argv[1:])
         nonlocal messages
         messages.append(types.Content(role="user", parts=[types.Part(text=user_prompt)]))
         response = client.models.generate_content(model='gemini-2.0-flash-001',contents=messages)
@@ -32,11 +34,8 @@ def main():
         print(f"Usage: python {sys.argv[0]} <prompt_required> [--verbose]")
         sys.exit(1)
 
-    verbose = sys.argv[-1] == "--verbose"
-    user_prompt = " ".join(sys.argv[1:-1]) if verbose else " ".join(sys.argv[1:])
-
-    conversation = llm_call(verbose=verbose)
-    conversation(user_prompt)
+    conversation = llm_call()
+    conversation()
 
 if __name__ == "__main__":
     main()
